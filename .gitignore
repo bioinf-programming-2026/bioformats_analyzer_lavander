@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+code/__pycache__/
+*.pyс
+.github/
+*$py.class
+
+# Sphinx documentation
+docs/source/_static/
+docs/source/_templates/
+docs/build/doctrees/
+docs/build/html/_modules
+docs/build/html/_sources
+docs/build/html/_static
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+

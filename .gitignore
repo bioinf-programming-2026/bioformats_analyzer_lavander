@@ -24,4 +24,7 @@ ENV/
 env.bak/
 venv.bak/
 
+# Big Files
+test/files/SRR3280893_1.fastq.gz
+
 

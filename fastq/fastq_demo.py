@@ -4,8 +4,10 @@ from fastq_analyzer import FastqAnalyzer
 
 
 def main():
-    """Прочитать файл, вывести статистику и отфильтровать записи."""
-    analyzer = FastqAnalyzer("test/files/example.fastq")
+    
+    """Прочитать файл, спросив название у юзера, вывести статистику и отфильтровать записи."""
+    filename = "test/files/" + input("Введите название файла>")
+    analyzer = FastqAnalyzer(filename)
     analyzer.read_records()
 
     print("Статистика:")

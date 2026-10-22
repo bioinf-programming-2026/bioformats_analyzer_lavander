@@ -440,8 +440,3 @@ def demo_fastq_analysis(filepath: str):
     print(f"4. График качества: {quality_plot}")
     print(f"5. График содержания: {content_plot}")
     print(f"6. Распределение длин: {length_plot}")    
-
-
-
-
-    

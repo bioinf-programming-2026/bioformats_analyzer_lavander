@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+code/__pycache__/
+*.pyс
+.github/
+*$py.class
+
+# Sphinx documentation
+docs/source/_static/
+docs/source/_templates/
+docs/build/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Big Files
+test/files/SRR3280893_1.fastq.gz
+test/files/real.fastq
+
+

@@ -1,5 +1,5 @@
 ##fileformat=VCFv4.0
-##filedat=20101112
+##fileDate=20101112
 ##datarelease=20100804
 ##samples=629
 ##description="Where BI calls are present, genotypes and alleles are from BI.  In there absence, UM genotypes are used.  If neither are available, no genotype information is present and the alleles are from the NCBI calls."

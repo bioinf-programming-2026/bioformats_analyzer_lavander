@@ -7,10 +7,7 @@ code/__pycache__/
 # Sphinx documentation
 docs/source/_static/
 docs/source/_templates/
-docs/build/doctrees/
-docs/build/html/_modules
-docs/build/html/_sources
-docs/build/html/_static
+docs/build/
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -26,5 +23,6 @@ venv.bak/
 
 # Big Files
 test/files/SRR3280893_1.fastq.gz
+test/files/real.fastq
 
 

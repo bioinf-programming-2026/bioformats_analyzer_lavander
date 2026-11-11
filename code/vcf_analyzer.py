@@ -19,29 +19,37 @@ Examples:
 class VcfReader(GenomicReader):
     """
     Реализация ридера для файлов в формате VCF (Variant Call Format).
-    
-    VCF - стандартный формат для хранения геномных вариаций, содержащий 
+
+    VCF - стандартный формат для хранения геномных вариаций, содержащий
     информацию о хромосоме, позиции, референсном и альтернативном аллелях,
     качестве вызова и дополнительных аннотациях.
-    
-    Наследует от абстрактного класса GenomicDataReader и реализует
+
+    Наследует от абстрактного класса `GenomicReader` и реализует
     специфичную для VCF логику парсинга и анализа данных.
 
     Attributes:
-        headers (List[str]): Список строк заголовка VCF файла
-        samples (List[str]): Список образцов (индивидуумов) из строки #CHROM VCF файла
-        _variants_count (int): Счетчик вариантов (для внутреннего использования)
+        headers (List[str]): Список строк заголовка VCF-файла в исходном порядке.
+        header_groups (Dict[str, List[str]]): Словарь {тег: [строки]} — сгруппированный заголовок.
+            Ключи содержат префикс: '##fileformat', '##INFO', '##FILTER',
+            '##FORMAT', '##contig', '#CHROM'.
+        column_names (List[str]): Список имён колонок из строки #CHROM.
+        samples (List[str]): Список образцов (индивидуумов) из строки #CHROM.
+        _variants_count: Счётчик вариантов в текущем проходе `read()`
+            (для внутреннего использования).
 
     Examples:
         >>> with VcfReader("variants.vcf") as r:
         ...     stats = r.get_region_stats()
         ...     types = r.get_variant_type_stats()
         ...     print(types)
-    """     
+    """
 
     def __init__(self, filepath: str | Path):
         """
         Инициализирует VCF-ридер.
+
+        Заголовок **не** разбирается здесь: файл ещё не открыт.
+        Разбор произойдёт в `GenomicReader.__enter__` (или в `reset()`).
 
         Args:
             filepath: Путь к VCF-файлу.
@@ -51,67 +59,65 @@ class VcfReader(GenomicReader):
             []
         """
         super().__init__(filepath)
-        self.headers = []
-        self.samples = []
+        self.headers: List[str] = []
+        self.header_groups: Dict[str, List[str]] = {}
+        self.column_names: List[str] = []
+        self.samples: List[str] = []
         self._variants_count = 0
+
+    # ------------------------------------------------------------------
+    #  Заголовок
+    # ------------------------------------------------------------------
 
     def get_header(self) -> Dict[str, List[str]]:
         """
         Возвращает заголовок VCF, сгруппированный по тегам.
 
         Returns:
-            Dict[str, List[str]]: ключи — теги (включая '##' или '#'),
-            значения — списки строк с этим тегом (без изменений).
+            Dict[str, List[str]]: ключи — теги с префиксом ('##fileformat',
+            '##INFO', '#CHROM' и т.п.), значения — списки строк.
 
-        Пример:
-            {
-                '##fileformat': ['##fileformat=VCFv4.2'],
-                '##fileDate':   ['##fileDate=20250101'],
-                '##reference':  ['##reference=GRCh38'],
-                '##source':     ['##source=myPipeline'],
-                '##INFO': [
-                    '##INFO=<ID=DP,...>',
-                    '##INFO=<ID=AF,...>',
-                    '##INFO=<ID=DB,...>',
-                ],
-                '#CHROM': ['#CHROM\tPOS\tID\t...'],
-            }
-        
         Examples:
             >>> with VcfReader("variants.vcf") as r:
             ...     "##fileformat" in r.get_header()
             True
         """
-        grouped: Dict[str, List[str]] = {}
-        for line in self.headers:
-            if line.startswith("##"):
-                tag = line.split("=", 1)[0]          # '##INFO', '##fileformat'
-            elif line.startswith("#"):
-                tag = line.split("\t", 1)[0]         # '#CHROM'
-            else:
-                continue
-            grouped.setdefault(tag, []).append(line)
-        return grouped
+        return self.header_groups
+
+    def get_header_group(self, group_name: str) -> List[str]:
+        """
+        Возвращает строки заголовка указанной группы.
+
+        Имя группы можно передавать как с префиксом, так и без него:
+        `'INFO'`, `'##INFO'` — эквивалентны; `'#CHROM'` — как есть.
+
+        Args:
+            group_name: Имя группы.
+
+        Returns:
+            List[str]: Список строк указанной группы или пустой список.
+
+        Examples:
+            >>> with VcfReader("variants.vcf") as r:
+            ...     for line in r.get_header_group("INFO")[:2]:
+            ...         print(line)
+        """
+        key = group_name if group_name.startswith("#") else f"##{group_name}"
+        return self.header_groups.get(key, [])
 
     def _parse_header(self):
         """
-        Разбирает заголовок VCF и извлекает имена образцов.
-        
-        VCF заголовок состоит из строк, начинающихся с '#' и содержит:
-        - Мета-информацию (##-строки)
-        - Строку с названиями колонок (#CHROM...)
-        - Информацию о формате и образцах
-        
-        Алгоритм:
-        1. Сохраняет текущую позицию в файле
-        2. Читает файл с начала до первой не-заголовочной строки
-        3. Извлекает имена образцов из строки #CHROM
-        4. Восстанавливает исходную позицию чтения
-        
-        Устанавливает:
-            self.headers: все строки заголовка
-            self.samples: список образцов (если есть)
-            self._header_parsed: True после завершения парсинга
+        Разбирает заголовок VCF, валидирует формат и извлекает группы.
+
+        - Проверяет, что первая строка начинается с '##fileformat=VCF'.
+        - Проверяет наличие строки '#CHROM'.
+        - Заполняет `self.headers`, `self.header_groups`, `self.column_names`,
+          `self.samples`.
+        - Устанавливает `self._header_parsed = True`.
+
+        Raises:
+            ValueError: Если файл не соответствует формату VCF
+                (нет '##fileformat=VCF' или отсутствует '#CHROM').
 
         Examples:
             >>> with VcfReader("variants.vcf") as r:
@@ -120,60 +126,216 @@ class VcfReader(GenomicReader):
             True
         """
         self.headers = []
+        self.header_groups = {}
+        self.column_names = []
         self.samples = []
-        
+
         if not self.file:
             return
 
         # Сохраняем начальную позицию для восстановления после парсинга
         current_pos = self.file.tell()
         self.file.seek(0)
-        
-        line = self.file.readline()
-        while line and line.startswith('#'):
-            self.headers.append(line.strip())
-            
-            if line.startswith('#CHROM'):
-                # Парсим строку с названиями колонок
-                # Формат: #CHROM POS ID REF ALT QUAL FILTER INFO FORMAT [SAMPLE1 ...]
-                parts = line.strip().split('\t')
-                if len(parts) >= 10:  # Минимум: обязательные поля + samples
-                    self.samples = parts[9:]  # Образцы начинаются с 9-й колонки
-            
+
+        try:
+            first_line = self.file.readline()
+            if not first_line.startswith("##fileformat=VCF"):
+                raise ValueError(
+                    f"Файл '{self.filepath}' не соответствует формату VCF! "
+                    "Первая строка должна начинаться с '##fileformat=VCF'."
+                )
+
+            self.headers.append(first_line.strip())
+            group_key = first_line.split("=", 1)[0]          # '##fileformat'
+            self.header_groups.setdefault(group_key, []).append(first_line.strip())
+
             line = self.file.readline()
-        
-        # Возвращаемся к начальной позиции чтения данных
-        self.file.seek(current_pos)
-        self._header_parsed = True
+            while line:
+                line_str = line.strip()
+                if line_str.startswith("##"):
+                    self.headers.append(line_str)
+                    group_key = line_str.split("=", 1)[0]    # '##INFO', '##FILTER'
+                    self.header_groups.setdefault(group_key, []).append(line_str)
+                elif line_str.startswith("#CHROM"):
+                    # Парсим строку с названиями колонок
+                    # Формат: #CHROM POS ID REF ALT QUAL FILTER INFO FORMAT [SAMPLE1 ...]
+                    self.headers.append(line_str)
+                    parts = line_str.split("\t")
+                    self.column_names = [p.lstrip("#") for p in parts]
+                    if len(parts) >= 10:  # Минимум: обязательные поля + samples
+                        self.samples = parts[9:]  # Образцы начинаются с 9-й колонки
+                    self.header_groups.setdefault("#CHROM", []).append(line_str)
+                    self._header_parsed = True
+                    return
+                else:
+                    raise ValueError(
+                        f"Файл '{self.filepath}': отсутствует строка "
+                        f"заголовка столбцов '#CHROM'."
+                    )
+                line = self.file.readline()
 
-    def validate_coordinate(self, chrom, pos):
-        """Проверяет корректность геномной координаты.
+            raise ValueError(
+                f"Файл '{self.filepath}': отсутствует строка "
+                f"заголовка столбцов '#CHROM'."
+            )
+        finally:
+            # Возвращаемся к начальной позиции чтения данных
+            self.file.seek(current_pos)
 
-        Args:
-            chrom: Название хромосомы.
-            pos: Позиция.
+    # ------------------------------------------------------------------
+    #  Чтение
+    # ------------------------------------------------------------------
 
-        Returns:
-            bool: True, если хромосома есть в файле и позиция положительна.
+    def read(self) -> Iterator[VariantRecord]:
+        """
+        Основной метод чтения вариантов из VCF-файла.
+
+        Генератор, который последовательно читает и парсит варианты из файла,
+        возвращая объекты VariantRecord для каждой валидной строки с вариантом.
+        Некорректные строки (меньше 8 колонок, невалидный POS/QUAL) пропускаются
+        с выводом предупреждения — поток не прерывается.
+
+        Yields:
+            VariantRecord: Объект, содержащий информацию о геномном варианте
+
+        Raises:
+            ValueError: Если файл не был открыт перед чтением.
+
+        Процесс:
+        1. Пропускает все заголовочные строки
+        2. Читает файл построчно
+        3. Для каждой не-пустой и не-заголовочной строки вызывает _parse_variant_line()
+        4. Увеличивает счетчик вариантов для каждого успешно распарсенного варианта
 
         Examples:
             >>> with VcfReader("variants.vcf") as r:
-            ...     r.validate_coordinate("chr1", 100)
-            True
+            ...     first = next(r.read())
+            ...     first.chrom
+            'chr1'
         """
-        return chrom in self.get_chromosomes() and pos > 0
-    
+        if not self.file:
+            raise ValueError(
+                "Файл не открыт. Используйте VcfReader как контекстный менеджер."
+            )
+        
+        # Переходим к началу данных (после заголовков)
+        self.file.seek(0)
+        line = self.file.readline()
+        while line and line.startswith('#'):
+            line = self.file.readline()
+
+        # Читаем и парсим данные о вариантах
+        self._variants_count = 0
+        while line:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                variant = self._parse_variant_line(line)
+                if variant:
+                    self._variants_count += 1
+                    yield variant
+            line = self.file.readline()
+
+    def _parse_variant_line(self, line: str) -> VariantRecord | None:
+        """
+        Парсит одну строку с вариантом из VCF-файла.
+
+        VCF-строки вариантов содержат минимум 8 обязательных полей:
+        CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO. Здесь выполняется
+        вся нормализация и приведение типов:
+
+        - CHROM, ID, FILTER — `.strip()`;
+        - POS — `int()`;
+        - REF — `.strip().upper()`;
+        - ALT — `.strip().upper()`, split по `,`, пустой список при `"."`;
+        - QUAL — `float()`, `None` при `"."`;
+        - INFO — разбор `k1=v1;k2;k3=v3` в `dict`.
+
+        Готовые значения передаются в конструктор `VariantRecord`.
+
+        Args:
+            line (str): Строка из VCF-файла, содержащая описание варианта.
+
+        Returns:
+            VariantRecord | None: Объект варианта или None при ошибке парсинга
+            (короткая строка, невалидный POS/QUAL и т.п.).
+
+        Examples:
+            >>> r = VcfReader("variants.vcf")
+            >>> rec = r._parse_variant_line(
+            ...     "chr1\\t100\\t.\\tA\\tT\\t50\\tPASS\\tDP=30")
+            >>> rec.pos, rec.ref, rec.alt, rec.qual, rec.info["DP"]
+            (100, 'A', ['T'], 50.0, '30')
+            >>> rec = r._parse_variant_line(
+            ...     "chr1\\t100\\t.\\tA\\t.\\t.\\tPASS\\tDB;DP=5")
+            >>> rec.alt, rec.qual, rec.info
+            ([], None, {'DB': True, 'DP': '5'})
+        """
+        parts = line.split('\t')
+        if len(parts) < 8:
+            return None
+
+        try:
+            chrom = parts[0].strip()
+            pos = int(parts[1])
+            var_id = parts[2].strip()
+            ref = parts[3].strip().upper()
+
+            # ALT может содержать несколько аллелей через запятую
+            alt_raw = parts[4]
+            alt: List[str] = (
+                [a.strip().upper() for a in alt_raw.split(",")]
+                if alt_raw != "." else []
+            )
+
+            # QUAL может быть числом или точкой '.'
+            qual_raw = parts[5]
+            qual = float(qual_raw) if qual_raw != "." else None
+
+            filt = parts[6].strip()
+
+            # Парсим INFO поле в словарь
+            info_str = parts[7]
+            info: Dict[str, Any] = {}
+            if info_str and info_str != ".":
+                for item in info_str.strip().split(";"):
+                    if "=" in item:
+                        k, v = item.split("=", 1)
+                        info[k] = v
+                    elif item:
+                        info[item] = True
+
+            return VariantRecord(
+                chrom=chrom,
+                pos=pos,
+                var_id=var_id,
+                ref=ref,
+                alt=alt,
+                qual=qual,
+                filt=filt,
+                info=info,
+            )
+        except (ValueError, IndexError) as e:
+            print(f"Ошибка парсинга варианта: {e}")
+            return None
+
+    # ------------------------------------------------------------------
+    #  Регион / пересечение
+    # ------------------------------------------------------------------
+
     def get_records_in_region(
         self, chrom: str, start: int, end: int
-        ) -> Iterator[VariantRecord]:
-        """Возвращает варианты, пересекающие указанный регион.
+    ) -> Iterator[VariantRecord]:
+        """
+        Возвращает варианты, пересекающие указанный регион [start, end].
 
-        Интервал варианта считается как `[pos, pos + len(ref) - 1]`.
+        Использует `VariantRecord.intersects` (учёт длины REF для INDEL).
+        Реализует логику bedtools intersect. Работает как генератор,
+        фильтруя поток мутаций.
 
         Args:
             chrom: Название хромосомы.
-            start: Начало региона.
-            end: Конец региона.
+            start: Начало региона (1-based, включительно).
+            end: Конец региона (1-based, включительно).
 
         Yields:
             VariantRecord: Варианты, пересекающие регион.
@@ -185,13 +347,13 @@ class VcfReader(GenomicReader):
             True
         """
         for record in self.read():
-            if record.chrom != chrom:
-                continue
-            rec_start = record.pos
-            rec_end = record.pos + len(record.ref) - 1
-            if rec_start <= end and rec_end >= start:
+            if record.intersects(chrom, start, end):
                 yield record
-    
+
+    # ------------------------------------------------------------------
+    #  Фильтрация и подсчёт
+    # ------------------------------------------------------------------
+
     def filter_records(self, **filters) -> Iterator[VariantRecord]:
         """Фильтрует варианты по атрибутам VariantRecord.
 
@@ -210,283 +372,119 @@ class VcfReader(GenomicReader):
             if all(getattr(record, k, None) == v for k, v in filters.items()):
                 yield record
 
-
-    def read(self) -> Iterator[VariantRecord]:
+    def get_variants_count(self) -> int:
         """
-        Основной метод чтения вариантов из VCF файла.
-        
-        Генератор, который последовательно читает и парсит варианты из файла,
-        возвращая объекты VariantRecord для каждой валидной строки с вариантом.
-        
-        Yields:
-            VariantRecord: Объект, содержащий информацию о геномном варианте
-            
-        Raises:
-            ValueError: Если файл не был открыт перед чтением
-            
-        Процесс:
-        1. Пропускает все заголовочные строки
-        2. Читает файл построчно
-        3. Для каждой не-пустой и не-заголовочной строки вызывает _parse_variant_line()
-        4. Увеличивает счетчик вариантов для каждого успешно распарсенного варианта
+        Потоковый подсчёт общего количества вариантов в файле.
+
+        Итерируется по `read()`, не загружая данные в память целиком.
+        Считаются только валидные варианты (те же, что отдаёт `read()`).
+
+        Returns:
+            int: Общее число валидных вариантов.
 
         Examples:
             >>> with VcfReader("variants.vcf") as r:
-            ...     first = next(r.read())
-            ...     first.chrom
-            'chr1'
+            ...     r.get_variants_count() >= 0
+            True
         """
-        if not self.file:
-            raise ValueError("Файл не открыт")
-        
-        # Переходим к началу данных (после заголовков)
-        self.file.seek(0)
-        line = self.file.readline()
-        while line and line.startswith('#'):
-            line = self.file.readline()
-        
-        # Читаем и парсим данные о вариантах
-        self._variants_count = 0
-        while line:
-            line = line.strip()
-            if line and not line.startswith('#'):
-                variant = self._parse_variant_line(line)
-                if variant:
-                    self._variants_count += 1
-                    yield variant
-            line = self.file.readline()
+        return sum(1 for _ in self.read())
 
-    def _parse_variant_line(self, line: str) -> VariantRecord | None:
-        """
-        Парсит одну строку с вариантом из VCF файла.
-        
-        VCF строки вариантов содержат минимум 8 обязательных полей:
-        CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO
-        
+    def validate_coordinate(self, chrom: str, pos: int) -> bool:
+        """Проверяет корректность геномной координаты.
+
         Args:
-            line (str): Строка из VCF файла, содержащая описание варианта
-            
+            chrom: Название хромосомы.
+            pos: Позиция (1-based).
+
         Returns:
-            VariantRecord | None: Объект варианта или None при ошибке парсинга
-            
-        Обрабатываемые поля:
-            - CHROM: хромосома (str)
-            - POS: позиция (int)
-            - REF: референсный аллель (str)
-            - ALT: альтернативный аллель (str)
-            - INFO: поле с дополнительной информацией (парсится в dict)
-        
+            bool: True, если хромосома есть в файле и позиция положительна.
+
         Examples:
-            >>> r = VcfReader("variants.vcf")
-            >>> rec = r._parse_variant_line("chr1\\t100\\t.\\tA\\tT\\t50\\tPASS\\tDP=30")
-            >>> rec.ref, rec.alt, rec.info["DP"]
-            ('A', 'T', '30')
+            >>> with VcfReader("variants.vcf") as r:
+            ...     r.validate_coordinate("chr1", 100)
+            True
         """
-        parts = line.split('\t')
-        if len(parts) < 8:
-            return None
-        
-        try:
-            chrom = parts[0]
-            pos = int(parts[1])
-            ref = parts[3]
-            alt = parts[4]
-            
-            # Парсим INFO поле в словарь
-            info_dict = {}
-            if parts[7] != '.':
-                for info_item in parts[7].split(';'):
-                    if '=' in info_item:
-                        key, value = info_item.split('=', 1)
-                        info_dict[key] = value
-                    else:
-                        info_dict[info_item] = True
-            
-            return VariantRecord(chrom, pos, ref, alt, info_dict)
-            
-        except (ValueError, IndexError) as e:
-            print(f"Ошибка парсинга варианта: {e}")
-            return None
+        return chrom in self.get_chromosomes() and pos > 0
+
+    # ------------------------------------------------------------------
+    #  Статистика
+    # ------------------------------------------------------------------
 
     def get_statistics(self) -> Dict[str, Any]:
         """
-        Возвращает базовую статистику по VCF файлу.
-        
+        Возвращает базовую статистику по VCF-файлу.
+
         Returns:
             Dict[str, Any]: Словарь со статистикой:
                 - total_variants: общее количество вариантов
                 - samples_count: количество образцов
                 - header_lines: количество строк в заголовке
-        
+
         Examples:
             >>> with VcfReader("variants.vcf") as r:
             ...     stats = r.get_statistics()
             ...     "total_variants" in stats
             True
         """
-        # Пересчитываем количество вариантов для актуальности
-        count = self._count_variants()
         return {
-            'total_variants': count,
+            'total_variants': self.get_variants_count(),
             'samples_count': len(self.samples),
-            'header_lines': len(self.headers)
+            'header_lines': len(self.headers),
         }
-
-    def _count_variants(self) -> int:
-        """
-        Подсчитывает количество валидных вариантов в файле.
-        
-        Returns:
-            int: Количество строк с вариантами (не-заголовочных строк)
-            
-        Примечание:
-            Метод независимо подсчитывает варианты, временно перемещая
-            позицию чтения файла и восстанавливая её после подсчета.
-
-        Examples:
-            >>> with VcfReader("variants.vcf") as r:
-            ...     r._count_variants() >= 0
-            True
-        """
-        if not self.file:
-            return 0
-        
-        current_pos = self.file.tell()
-        self.file.seek(0)
-        
-        # Пропускаем заголовки
-        line = self.file.readline()
-        while line and line.startswith('#'):
-            line = self.file.readline()
-        
-        # Считаем варианты (все не-пустые не-заголовочные строки)
-        count = 0
-        while line:
-            line = line.strip()
-            if line and not line.startswith('#'): 
-                parts = line.split('\t')
-                if len(parts) >= 8:
-                    try:
-                        int(parts[1])
-                        count += 1
-                    except ValueError:
-                        pass
-            line = self.file.readline()
-        
-        # Восстанавливаем исходную позицию чтения
-        self.file.seek(current_pos)
-        return count
 
     def get_chromosomes(self) -> List[str]:
         """
         Возвращает список уникальных хромосом, представленных в файле.
-        
+
         Returns:
-            List[str]: Отсортированный список названий хромосом
-            
+            List[str]: Отсортированный список названий хромосом.
+
         Примечание:
-            Для больших файлов может быть затратной операцией,
-            так требует полного прохода по файлу.
+            Проходит через `read()`, поэтому учитываются только валидные
+            варианты (битые строки пропускаются, как и при чтении).
 
         Examples:
             >>> with VcfReader("variants.vcf") as r:
             ...     "chr1" in r.get_chromosomes()
             True
         """
-        chromosomes = set()
-        
-        if not self.file:
-            return list(chromosomes)
-        
-        current_pos = self.file.tell()
-        self.file.seek(0)
-        
-        # Пропускаем заголовки
-        line = self.file.readline()
-        while line and line.startswith('#'):
-            line = self.file.readline()
-        
-        # Собираем уникальные хромосомы
-        while line:
-            line = line.strip()
-            if line and not line.startswith('#'):
-                parts = line.split('\t')
-                if len(parts) >= 8:
-                    chromosomes.add(parts[0])  # CHROM - первая колонка
-            line = self.file.readline()
-        
-        # Восстанавливаем позицию чтения
-        self.file.seek(current_pos)
-        
-        return sorted(list(chromosomes))
+        return sorted({record.chrom for record in self.read()})
 
     def get_region_stats(self) -> pd.DataFrame:
         """
         Возвращает распределение вариантов по хромосомам.
-        
+
         Returns:
-            pd.DataFrame: DataFrame с колонками:
-                - chromosome: название хромосомы
-                - variant_count: количество вариантов на хромосоме
-        
+            pd.DataFrame: Колонки ['chromosome', 'variant_count'].
+
         Examples:
             >>> with VcfReader("variants.vcf") as r:
             ...     df = r.get_region_stats()
             ...     list(df.columns)
-            ...     print(stats_df)  # Показывает таблицу с распределением
             ['chromosome', 'variant_count']
-                    
         """
-        region_counts = {}
-        
-        if not self.file:
-            return pd.DataFrame(columns=['chromosome', 'variant_count'])
-        
-        current_pos = self.file.tell()
-        self.file.seek(0)
-        
-        # Пропускаем заголовки
-        line = self.file.readline()
-        while line and line.startswith('#'):
-            line = self.file.readline()
-        
-        # Считаем варианты по хромосомам
-        while line:
-            line = line.strip()
-            if line and not line.startswith('#'):
-                parts = line.split('\t')
-                if parts:
-                    chrom = parts[0]
-                    region_counts[chrom] = region_counts.get(chrom, 0) + 1
-            line = self.file.readline()
-        
-        # Восстанавливаем позицию чтения
-        self.file.seek(current_pos)
-        
+        region_counts: Dict[str, int] = {}
+
+        for record in self.read():
+            region_counts[record.chrom] = region_counts.get(record.chrom, 0) + 1
+
         # Создаем DataFrame из собранных данных
-        data = []
-        for chrom, count in region_counts.items():
-            data.append({'chromosome': chrom, 'variant_count': count})
-        
-        return pd.DataFrame(data)
+        return pd.DataFrame(
+            [{'chromosome': c, 'variant_count': n}
+             for c, n in region_counts.items()],
+            columns=['chromosome', 'variant_count'],
+        )
 
     def get_variant_type_stats(self) -> pd.DataFrame:
         """
         Анализирует и возвращает статистику по типам геномных вариантов.
-        
-        Классификация вариантов:
-            - SNV (Single Nucleotide Variant): одинарные нуклеотидные замены
-            - Insertion: вставки (REF короче ALT)
-            - Deletion: делеции (REF длиннее ALT)  
-            - Complex: сложные варианты (равная длина, но разные последовательности)
-            - MultiAllelic
-            - Symbolic
-            
+
+        Классификация: SNV, Insertion, Deletion, Complex,
+        MultiAllelic, Symbolic.
+
         Returns:
-            pd.DataFrame: DataFrame с колонками:
-                - variant_type: тип варианта
-                - count: количество вариантов этого типа
-        
+            pd.DataFrame: Колонки ['variant_type', 'count'].
+
         Examples:
             >>> with VcfReader("variants.vcf") as r:
             ...     df = r.get_variant_type_stats()
@@ -503,61 +501,42 @@ class VcfReader(GenomicReader):
             'MultiAllelic': 0,
             'Symbolic': 0,
         }
-        
-        if not self.file:
-            return pd.DataFrame(columns=['variant_type', 'count'])
-        
-        current_pos = self.file.tell()
-        self.file.seek(0)
-        
-        # Пропускаем заголовки
-        line = self.file.readline()
-        while line and line.startswith('#'):
-            line = self.file.readline()
-        
-        # Анализируем типы вариантов по длине REF и ALT
-        while line:
-            line = line.strip()
-            if line and not line.startswith('#'):
-                parts = line.split('\t')
-                if len(parts) >= 5:
-                    ref = parts[3]
-                    alt = parts[4]
-                    alts = alt.split(',')
 
-                    # Определяем тип варианта по длине последовательностей
-                    if len(alts) > 1:
-                        type_counts['MultiAllelic'] += 1
-                    else:
-                        a = alts[0]
-                        if a in ('.', '*') or a.startswith('<'):
-                            type_counts['Symbolic'] += 1
-                        elif len(ref) == 1 and len(alt) == 1:
-                            type_counts['SNV'] += 1
-                        elif len(ref) < len(alt):
-                            type_counts['Insertion'] += 1
-                        elif len(ref) > len(alt):
-                            type_counts['Deletion'] += 1
-                        else:
-                            type_counts['Complex'] += 1
-            
-            line = self.file.readline()
-        
-        # Восстанавливаем позицию чтения
-        self.file.seek(current_pos)
-        
+        for record in self.read():
+            alts = record.alt
+            if len(alts) > 1:
+                type_counts['MultiAllelic'] += 1
+            elif not alts:
+                # ALT == "." в исходной строке
+                type_counts['Symbolic'] += 1
+            else:
+                a = alts[0]
+                if a in ('.', '*') or a.startswith('<'):
+                    type_counts['Symbolic'] += 1
+                elif len(record.ref) == 1 and len(a) == 1:
+                    type_counts['SNV'] += 1
+                elif len(record.ref) < len(a):
+                    type_counts['Insertion'] += 1
+                elif len(record.ref) > len(a):
+                    type_counts['Deletion'] += 1
+                else:
+                    type_counts['Complex'] += 1
+
         # Создаем DataFrame только для ненулевых типов
-        data = []
-        for var_type, count in type_counts.items():
-            if count > 0:
-                data.append({'variant_type': var_type, 'count': count})
-        
-        return pd.DataFrame(data)
+        return pd.DataFrame(
+            [{'variant_type': t, 'count': c}
+             for t, c in type_counts.items() if c > 0],
+            columns=['variant_type', 'count'],
+        )
+
+    # ------------------------------------------------------------------
+    #  Управление состоянием
+    # ------------------------------------------------------------------
 
     def reset(self) -> None:
         """
         Сбрасывает состояние ридера к начальному.
-        
+
         Действия:
             - Перемещает позицию чтения файла в начало
             - Перепарсивает заголовок файла
@@ -586,5 +565,7 @@ class VcfReader(GenomicReader):
         """
         super().close()
         self.headers = []
+        self.header_groups = {}
+        self.column_names = []
         self.samples = []
         self._variants_count = 0

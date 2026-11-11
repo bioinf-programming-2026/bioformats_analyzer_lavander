@@ -9,6 +9,7 @@ Examples:
     >>> len(rec)
     4
 """
+from typing import List, Dict, Any, Optional
 
 class Record:
     """Базовая запись биологических данных.
@@ -132,36 +133,137 @@ class AlignmentRecord(Record):
 class VariantRecord(Record):
     """Запись геномного варианта из VCF-файла.
 
+    Хранит полную информацию о мутации: хромосома, позиция, аллели,
+    качество, фильтр и разобранный словарь INFO. Поддерживает
+    интервальные проверки (`start`, `end`, `intersects`), эквивалентные
+    поведению bedtools intersect.
+
     Attributes:
-        chrom: Название хромосомы.
-        pos: Позиция варианта.
-        ref: Референсный аллель.
-        alt: Альтернативный аллель.
-        info: Словарь дополнительных аннотаций из поля INFO.
+        chrom: Название хромосомы (нормализованное, stripped).
+        pos: Позиция варианта (1-based).
+        var_id: Поле ID из VCF ('.', если отсутствует).
+        ref: Референсный аллель (в верхнем регистре).
+        alt: Список альтернативных аллелей (в верхнем регистре);
+            пустой список для записи `ALT="."`.
+        qual: Качество варианта (float) или None для `"."`.
+        filter: Поле FILTER.
+        info: Словарь аннотаций из поля INFO.
+        start: Свойство — начало мутации (1-based), совпадает с `pos`.
+        end: Свойство — конец мутации по длине REF.
 
     Examples:
-        >>> rec = VariantRecord("chr1", 100, "A", "T", {"DP": "30"})
+        >>> rec = VariantRecord(
+        ...     chrom="chr1", pos=100, var_id=".",
+        ...     ref="A", alt=["T"], qual=50.0, filt="PASS",
+        ...     info={"DP": "30"},
+        ... )
         >>> rec.id
         'chr1:100'
+        >>> rec.start, rec.end
+        (100, 100)
+        >>> rec.intersects("chr1", 90, 110)
+        True
+        >>> VariantRecord(
+        ...     chrom="chr1", pos=100, var_id=".",
+        ...     ref="AT", alt=["A"], qual=None, filt="PASS", info={},
+        ... ).end
+        101
     """
 
-    def __init__(self, chrom: str, pos: int, ref: str, alt: str, info: dict):
-        """Инициализирует запись варианта.
+    def __init__(
+        self,
+        chrom: str,
+        pos: int,
+        var_id: str,
+        ref: str,
+        alt: List[str],
+        qual: Optional[float],
+        filt: str,
+        info: Dict[str, Any],
+    ):
+        """Инициализирует запись варианта из уже разобранных полей.
 
         Args:
             chrom: Название хромосомы.
-            pos: Позиция варианта.
+            pos: Позиция варианта (1-based), уже приведённая к int.
+            var_id: Поле ID из VCF.
             ref: Референсный аллель.
-            alt: Альтернативный аллель.
-            info: Разобранное поле INFO.
+            alt: Список альтернативных аллелей.
+            qual: Качество варианта (float) или None.
+            filt: Поле FILTER.
+            info: Разобранный словарь INFO.
 
         Examples:
-            >>> VariantRecord("chr1", 100, "A", "T", {}).pos
-            100
+            >>> VariantRecord("chr1", 100, ".", "A", ["T", "G"], 50.0,
+            ...               "PASS", {"DP": "30"}).alt
+            ['T', 'G']
         """
         super().__init__(f"{chrom}:{pos}")
         self.chrom = chrom
         self.pos = pos
+        self.var_id = var_id
         self.ref = ref
         self.alt = alt
+        self.qual = qual
+        self.filter = filt
         self.info = info
+
+    @property
+    def start(self) -> int:
+        """Начало мутации (1-based).
+
+        Returns:
+            int: Позиция начала (совпадает с `pos`).
+        """
+        return self.pos
+
+    @property
+    def end(self) -> int:
+        """Конец мутации.
+
+        Вычисляется по длине референсного аллеля REF
+        (SNV: len=1, INDEL: len > 1).
+
+        Returns:
+            int: Позиция конца (1-based, включительно).
+        """
+        return self.pos + max(len(self.ref), 1) - 1
+
+    def intersects(self, chrom: str, start: int, end: int) -> bool:
+        """Проверка пересечения с интервалом [start, end].
+
+        Реализует логику bedtools intersect: отрезки [A, B] и [C, D]
+        пересекаются, если не выполняется (B < C или A > D).
+
+        Args:
+            chrom: Хромосома запрашиваемого региона.
+            start: Начало региона (1-based, включительно).
+            end: Конец региона (1-based, включительно).
+
+        Returns:
+            bool: True, если вариант пересекается с регионом.
+
+        Examples:
+            >>> VariantRecord("chr1", 100, ".", "A", "T", ".", "PASS", ".")\
+                    .intersects("chr1", 90, 110)
+            True
+            >>> VariantRecord("chr1", 100, ".", "A", "T", ".", "PASS", ".")\
+                    .intersects("chr2", 90, 110)
+            False
+        """
+        if self.chrom != str(chrom):
+            return False
+        return not (self.end < start or self.start > end)
+
+    def __repr__(self) -> str:
+        """Строковое представление записи варианта.
+
+        Returns:
+            str: Представление вида `<VariantRecord chrom:pos REF>ALT>`.
+
+        Examples:
+            >>> repr(VariantRecord("chr1", 100, ".", "A", "T,G", ".", "PASS", "."))
+            '<VariantRecord chr1:100 A>T,G>'
+        """
+        alt_repr = ",".join(self.alt) if self.alt else "."
+        return f"<VariantRecord {self.chrom}:{self.pos} {self.ref}>{alt_repr}>"

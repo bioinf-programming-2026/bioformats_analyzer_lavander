@@ -22,6 +22,25 @@ Examples:
     Введите путь к файлу: seqs.fasta
 """
 
+def print_header(title: str):
+    """Оформление заголовка блока.
+        
+    Args:
+        title: Заголовок блока.
+        
+    Examples:
+        >>> print_header("FASTA: ТЕСТЫ")
+        <BLANKLINE>
+        ==========================================================================
+        >>> FASTA: ТЕСТЫ
+        ==========================================================================
+    """
+    print("\n" + "=" * 70)
+    print(f" >>> {title}")
+    print("=" * 70)
+
+
+
 # ====== FASTA ======
 
 def tests_fasta_analysis():
@@ -36,10 +55,9 @@ def tests_fasta_analysis():
     Examples:
         >>> tests_fasta_analysis()
         Запуск тестов FASTA...
-        Тест пройден!
+        Тесты FASTA пройдены!
     """
-
-    print("Запуск тестов FASTA...")
+    print("\nЗапуск тестов FASTA...")
     fasta_content = """>seq1
 ATCG
 >seq2
@@ -54,7 +72,7 @@ GGCC
             sequences = list(analyzer.read())
             assert analyzer.get_seq_count() == 2
             assert analyzer.get_mean_seq_length() == 4.0
-            print("Тест пройден!")
+            print("Тесты FASTA пройдены!", end="")
     finally:
         os.unlink(temp_file)
 
@@ -147,7 +165,7 @@ def tests_fastq_analysis():
         Запуск тестов FASTQ...
         Тесты FASTQ пройдены!
     """
-    print("Запуск тестов FASTQ...")
+    print("\nЗапуск тестов FASTQ...")
 
     # Создаем тестовый FASTQ файл
     fastq_content = """@test_read
@@ -163,14 +181,14 @@ IIII
     try:
         # Проверяем, что функция выполняется без ошибок
         test_fastq_analyzer()
-        print("Тесты FASTQ пройдены!")
+        print("Тесты FASTQ пройдены!", end="")
     finally:
         os.unlink(temp_file)
 
 
 # ====== SAM ======
 
-def demo_sam(file_path):
+def demo_sam(file_path, start=1, end=10000):
     """Демонстрирует работу SamReader на SAM-файле.
 
     Выводит заголовок, количество выравниваний, хромосомы,
@@ -178,156 +196,236 @@ def demo_sam(file_path):
 
     Args:
         file_path: Путь к SAM-файлу.
+        start: Начало геномного отрезка для bedtools-intersect.
+        end: Конец геномного отрезка.
 
     Examples:
         >>> demo_sam("aln.sam")  # doctest: +SKIP
         Тестирование SAM ридера...
         ========== Анализ SAM ==========
     """
-    print("Тестирование SAM ридера...")
-    print("========== Анализ SAM ==========")
-    print(f"Выбранный файл: {file_path}")
-    try:
-        with SamReader(file_path) as reader:
-            # Базовые методы
-            header = reader.get_header()
-            count = reader.count_alignments()
-            chroms = reader.get_chromosomes()
-            
-            print(f"1. Заголовок: {len(header)} строк")
-
-            header_groups = reader.get_header()                # группы (уже есть)
-            fields = reader.get_header_fields()                # разбор @SQ/@RG/@PG
-
-            print(f"Группы заголовка: {list(header_groups.keys())}")
-            # → ['@SQ', '@RG', '@PG', '@HD']
-
-            sq = fields.get('@SQ', {})
-            print(f"@SQ: {len(sq)} хромосом")
-            for name, info in list(sq.items())[:3]:
-                
-                print(f"  {name}: length={info.get('LN', '?')}")
-
-            rg = fields.get('@RG', {})
-            print(f"@RG: {list(rg.keys())}")                    # read groups по ID
-
-            print(f"2. Выравнивания: {count}")
-            print(f"3. Хромосомы: {chroms[:3]}")  # первые 3
-            print("\n4. Статистика по хромосомам:")
-            print(reader.stats_by_chromosome().to_string(index=False))
-
-            if chroms:
-                c = chroms[0]
-                region_records = reader.get_records_in_region(c, 1, 10_000)
-                print(f"\n5. Выравниваний в {c}:1-1000: {len(region_records)}")
-
-            # Первая запись
-            for rec in reader.read():
-                print(f"6. Первая запись: {rec.chrom}:{rec.start}")
-                break
-                
-    except Exception as e:
-        print(f"Ошибка SAM: {e}")
-
-
-# ====== VCF ======
-
-def demo_vcf(vcf_file):
-    """Демонстрирует работу VcfReader на VCF-файле.
-
-    Выводит статистику файла, заголовок, первые варианты,
-    распределение по хромосомам и типы вариантов.
-
-    Args:
-        vcf_file: Путь к VCF-файлу.
-
-    Examples:
-        >>> demo_vcf("variants.vcf")  # doctest: +SKIP
-        ========== Анализ VCF ==========
-    """
-    # vcf_file = input("Введите путь к VCF файлу: ") - убираем input и используем переданный аргумент
-    
-    if not os.path.exists(vcf_file):
-        print(f"Файл {vcf_file} не найден!")
+    if not os.path.exists(file_path):
+        print(f"Файл {file_path} не найден!")
         print("Убедитесь, что файл находится в той же директории")
         return
     
     try:
-        print(f"========== Анализ VCF ==========")
-        print(f"Выбранный файл: {vcf_file}")
-        print("=" * 60)
-        
-        with VcfReader(vcf_file) as reader:
-            # Получаем всю статистику
-            print("1. Статистика файла:")
-            print("-" * 30)
-            
-            stats = reader.get_statistics()
-            chromosomes = reader.get_chromosomes()
-            region_stats = reader.get_region_stats()
-            type_stats = reader.get_variant_type_stats()
-            
-            print(f"   Всего вариантов: {stats.get('total_variants', 0):,}")
-            print(f"   Образцы: {stats.get('samples_count', 0)}")
-            print(f"   Строк заголовка: {stats.get('header_lines', 0)}")
-            print(f"   Хромосомы: {chromosomes}")
+        print("\nТестирование SAM ридера...")
+        print("\n============================= Анализ SAM =============================\n")
+        print(f"Выбранный файл: {file_path}")
+        print("=" * 70)
+
+
+        with SamReader(file_path) as reader:
+            # --------------------------------------------------------------
+            # 1. Заголовок и группы метаданных (@SQ, @RG, @PG)
+            # --------------------------------------------------------------
+            print_header("1. ЗАГОЛОВОК И ГРУППЫ МЕТАДАННЫХ")
+
+            header = reader.get_header()                # группы (уже есть)
+            fields = reader.get_header_fields()         # разбор @SQ/@RG/@PG
+
+            print(f"Всего групп: {len(header)}")
+            print(f"Группы в файле: {list(header.keys())}")
             print()
+
+            # @SQ — референсы
+            sq = fields.get("@SQ", {})
+            if sq:
+                print(f" • Группа '@SQ' (референсов: {len(sq)}):")
+                for name, info in list(sq.items())[:2]:
+                    print(f"     {name}: length={info.get('LN', '?')}")
+                if len(sq) > 2:
+                    print(f"     ... и ещё {len(sq) - 2} референсов")
+                print()
+
+            # @RG — read groups
+            rg = fields.get("@RG", {})
+            if rg:
+                print(f" • Группа '@RG' (read groups: {len(rg)}):")
+                for rg_id in list(rg.keys())[:2]:        
+                    print(f"     ID={rg_id}")                 # read groups по ID
+                if len(rg) > 2:
+                    print(f"     ... и ещё {len(rg) - 2}")
+                print()
+
+            # @PG — программы
+            pg = fields.get("@PG", {})
+            if pg:
+                print(f" • Группа '@PG' (программ: {len(pg)}):")
+                for pg_id in list(pg.keys())[:2]:
+                    print(f"     ID={pg_id}")
+                if len(pg) > 2:
+                    print(f"     ... и ещё {len(pg) - 2}")
+                print()
+
+            # --------------------------------------------------------------
+            # 2. Подсчёт количества выравниваний (генератор)
+            # --------------------------------------------------------------
+            print_header("2. ПОДСЧЁТ КОЛИЧЕСТВА ВЫРАВНИВАНИЙ (ГЕНЕРАТОР)")
+
+            count = reader.count_alignments()
+            print(f"Общее число выравниваний: {count}")
+
+            # --------------------------------------------------------------
+            # 3. Статистика «количество выравниваний — регион» (pandas)
+            # --------------------------------------------------------------
+            print_header("3. СТАТИСТИКА «КОЛИЧЕСТВО ВЫРАВНИВАНИЙ — РЕГИОН» (PANDAS)")
+
+            stats_df = reader.stats_by_chromosome()
+            if not stats_df.empty:
+                for _, row in stats_df.iterrows():
+                    print(f"  {row.iloc[0]}: {row.iloc[1]} выравниваний")
+            else:
+                print("  Данные по регионам отсутствуют")
+
+            # --------------------------------------------------------------
+            # 4. Пересечение с геномным отрезком (bedtools intersect)
+            # --------------------------------------------------------------
+            chroms = reader.get_chromosomes()
+            if chroms:
+                target_chrom = chroms[0]
+                start_pos, end_pos = start, end
+
+                print_header(
+                    f"4. ПЕРЕСЕЧЕНИЕ: {target_chrom}:{start_pos}-{end_pos} "
+                    f"(BEDTOOLS INTERSECT)"
+                )
+
+                matched = list(reader.get_records_in_region(
+                    target_chrom, start_pos, end_pos))
+                count_in_matched = len(matched)
+                print(f"Найдено выравниваний в интервале: {count_in_matched}")
+                print()
+
+                if count_in_matched > 0:
+                    print("Примеры найденных выравниваний:")
+                    for i, rec in enumerate(matched[:5], 1):
+                        print(f"  [{i}] {rec.chrom}:{rec.start}  mapq={rec.mapq}")
+                    if count_in_matched > 5:
+                        print(f"  ... и ещё {len(matched) - 5} выравниваний")
+
+    except (FileNotFoundError, IsADirectoryError, ValueError) as e:
+        print(f"\n[ОШИБКА ФОРМАТА SAM]: {e}")
+    except Exception as e:
+        print(f"\n[НЕПРЕДВИДЕННАЯ ОШИБКА]: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+# ====== VCF ======
+
+def demo_vcf(vcf_file, start=1, end=10000):
+    """Демонстрирует работу VcfReader на VCF-файле.
+
+    Показывает статистику файла, группы метаданных заголовка, количество
+    вариантов, первые варианты, распределение по хромосомам, типы
+    вариантов, пересечение с регионом и потоковое чтение.
+
+    Args:
+        vcf_file: Путь к VCF-файлу.
+        start: Начало геномного отрезка для bedtools-intersect.
+        end: Конец геномного отрезка.
+
+    Examples:
+        >>> demo_vcf("variants.vcf")  # doctest: +SKIP
+        ================ Анализ VCF ==================
+    """
+    if not os.path.exists(vcf_file):
+        print(f"Файл {vcf_file} не найден!")
+        print("Убедитесь, что файл находится в той же директории")
+        return
+
+    try:
+        print("\n============================= Анализ VCF =============================\n")
+        print(f"Выбранный файл: {vcf_file}")
+        print("=" * 70)
+
+        with VcfReader(vcf_file) as reader:
+            # ---------------------------------------------------------------------
+            # 1. Заголовок и ВСЕ группы метаданных (стандартные + пользовательские)
+            # ---------------------------------------------------------------------
+            print_header("1. ЗАГОЛОВОК И ГРУППЫ МЕТАДАННЫХ")
 
             header = reader.get_header()
-            print(f"Группы заголовка: {list(header.keys())}")
-            print(f"  ##fileformat: {len(header.get('##fileformat', []))} записей")
-            print(f"  ##fileDate {len(header.get('##fileDate', []))} записей")
-            print(f"  ##source:   {len(header.get('##source', []))} записей")
-            print(f"  ##reference: {len(header.get('##reference', []))} записей")
-            print(f"  ##INFO: {len(header.get('##INFO', []))} записей")
-            print(f"  #CHROM: {len(header.get('#CHROM', []))} записей")
 
-            # Показываем первые несколько вариантов
-            print("2. Первые 5 вариантов:")
-            print("-" * 30)
-            
-            variant_count = 0
-            for variant in reader.read():
-                if variant_count >= 5:
-                    break
-                
-                # Форматируем информацию для красивого вывода
-                info_preview = format_info_preview(variant.info)
-                print(f"   {variant.id}")
-                print(f"     REF: {variant.ref} -> ALT: {variant.alt}")
-                print(f"     INFO: {info_preview}")
-                print()
-                variant_count += 1
-            
-            if variant_count == 0:
-                print("   Варианты не найдены")
+            print(f"   Всего групп: {len(header)}")
+            print(f"   Всего строк заголовка: {len(reader.headers)}")
+            print(f"   Группы в файле: {list(header.keys())}")
             print()
 
-            # Статистика по регионам
-            print("3. Распределение по хромосомам:")
-            print("-" * 30)
-            
+            # Стандартные группы показываем первыми (если они есть в файле),
+            # затем — все остальные (включая кастомные) в порядке появления
+            STANDARD_GROUPS = [
+            "##fileformat", "##fileDate", "##source", "##reference",
+            "##INFO", "##FILTER", "##FORMAT", "##contig",
+            "##ALT", "##SAMPLE", "##PEDIGREE",
+            ]
+            ordered_keys = [k for k in STANDARD_GROUPS if k in header]
+            ordered_keys += [k for k in header if k not in STANDARD_GROUPS]
+
+            for group_key in ordered_keys:
+                group_lines = header[group_key]
+                print(f"   • Группа '{group_key}' (записей: {len(group_lines)}):")
+                for line in group_lines[:3]:
+                    print(f"       {line}")
+                if len(group_lines) > 3:
+                    print(f"       ... и ещё {len(group_lines) - 3} строк")
+                print()
+
+            # ---------------------------------------------------------------------
+            # 2. Подсчёт количества вариантов (ТЗ 14.7.2.4)
+            # ---------------------------------------------------------------------
+            print_header("2. ПОДСЧЁТ КОЛИЧЕСТВА ВАРИАНТОВ (ГЕНЕРАТОР)")
+
+            total = reader.get_variants_count()
+            print(f"   Общее число вариантов: {total}")
+
+            # ---------------------------------------------------------------------
+            # 3. Распределение по хромосомам
+            # ---------------------------------------------------------------------
+            print_header("3. СТАТИСТИКА «КОЛИЧЕСТВО ВАРИАНТОВ - РЕГИОН» (PANDAS)")
+
+            region_stats = reader.get_region_stats()
             if not region_stats.empty:
                 for _, row in region_stats.iterrows():
-                    print(f"   {row['chromosome']}: {row['variant_count']:,} вариантов")
+                    print(f"   {row['chromosome']}: "
+                          f"{row['variant_count']:,} вариантов")
             else:
                 print("   Данные по регионам отсутствуют")
-            print()
 
-            # Статистика по типам вариантов
-            print("4. Типы вариантов:")
-            print("-" * 30)
-            
-            if not type_stats.empty:
-                total_variants = type_stats['count'].sum()
-                for _, row in type_stats.iterrows():
-                    percentage = (row['count'] / total_variants * 100) if total_variants > 0 else 0
-                    print(f"   {row['variant_type']}: {row['count']:,} ({percentage:.1f}%)")
-            else:
-                print("   Данные по типам вариантов отсутствуют")
+            # ---------------------------------------------------------------------
+            # 4. Пересечение с регионом (bedtools intersect)
+            # ---------------------------------------------------------------------
+            if not region_stats.empty:
+                target_chrom = region_stats["chromosome"].iloc[0]
+                start_pos, end_pos = start, end
 
+                print_header(
+                    f"4. ПЕРЕСЕЧЕНИЕ: {target_chrom}:{start_pos}-{end_pos} "
+                    f"(BEDTOOLS INTERSECT)"
+                )
+
+                matched = list(reader.get_records_in_region(
+                    chrom=target_chrom, start=start_pos, end=end_pos))
+                count_in_matched = len(matched)
+                print(f"   Найдено вариантов в интервале: {count_in_matched}")
+                print()
+                if count_in_matched > 0:
+                    print("   Примеры найденных мутаций в отрезке:")
+                    for i, var in enumerate(matched[:5], 1):
+                        alt_str = ",".join(var.alt) if var.alt else "."
+                        print(f"   [{i}] {var.chrom}:{var.pos} {var.ref}>{alt_str}")
+                        print(f"       ID: {var.var_id} | "
+                              f"QUAL: {var.qual} | FILTER: {var.filter}")
+                        print(f"       start={var.start}, end={var.end}")
+                        print(f"       INFO: {format_info_preview(var.info)}")
+                        print("   " + "-" * 50)
+
+    except (FileNotFoundError, IsADirectoryError, ValueError) as e:
+        print(f"\n[ОШИБКА ФОРМАТА VCF]: {e}")
     except Exception as e:
-        print(f"Ошибка при чтении VCF файла: {e}")
+        print(f"\n[НЕПРЕДВИДЕННАЯ ОШИБКА]: {e}")
         import traceback
         traceback.print_exc()
 
@@ -363,13 +461,23 @@ def format_info_preview(info_dict):
     return preview
 
 if __name__ == "__main__":
-    print("Поддерживаемые форматы: fasta, fastq, sam, vcf")
+    supported_formats = ("fasta", "fastq", "sam", "vcf")
+    print(f"Поддерживаемые форматы: {', '.join(supported_formats)}")
 
     fmt = input("Введите формат файла: ").strip().lower()
+
+    if fmt not in supported_formats:
+        print(f"[ОШИБКА] Неизвестный формат: '{fmt}'. "
+              f"Допустимые: {', '.join(supported_formats)}")
+        sys.exit(1)
+
     file_path = input("Введите путь к файлу: ").strip().strip('"').strip("'")
 
     if not os.path.exists(file_path):
-        print(f"Файл не найден: {file_path}")
+        print(f"[ОШИБКА] Файл не найден: {file_path}")
+        sys.exit(1)
+    if os.path.isdir(file_path):
+        print(f"[ОШИБКА] Указан путь к каталогу, а не файлу: {file_path}")
         sys.exit(1)
 
     if fmt == "fasta":
@@ -384,5 +492,3 @@ if __name__ == "__main__":
         demo_sam(file_path)
     elif fmt == "vcf":
         demo_vcf(file_path)
-    else:
-        print(f"Неизвестный формат: {fmt}")

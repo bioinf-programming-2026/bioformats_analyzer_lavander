@@ -78,46 +78,49 @@ def detect_format(filepath: str) -> str | None:
         return 'fastq'
     return None
 
-def _was_given_on_cli(ctx: click.Context, name: str) -> bool:
-    """True, если пользователь явно передал параметр в командной строке.
+@click.group(
+        help='Biological file analysis: FASTA, FASTQ, SAM or VCF.',
+        context_settings={'help_option_names': ['-h', '--help']},
+        no_args_is_help=True,
+)
+def main():
+    """Анализирует биологический файл (FASTA, FASTQ, SAM или VCF).
 
-    Работает независимо от значений по умолчанию: анализирует источник
-    параметра (COMMANDLINE / ENVIRONMENT / DEFAULT).
-
-    Для click < 8.0, где `get_parameter_source` отсутствует, откатывается
-    к проверке значения на `None`.
+    \b
+    Примеры:
+      python bioformats_analyzer.py samples.fasta
+      python bioformats_analyzer.py reads.fq -f fastq --test
+      python bioformats_analyzer.py variants.vcf --output
+      python bioformats_analyzer.py aln.sam --start 1000 --end 5000
     """
-    get_source = getattr(ctx, 'get_parameter_source', None)
-    if get_source is None:
-        return ctx.params.get(name) is not None
-    try:
-        from click.core import ParameterSource
-        return get_source(name) == ParameterSource.COMMANDLINE
-    except Exception:
-        return ctx.params.get(name) is not None
+    pass
 
-@click.command(help='Biological file analysis: FASTA, FASTQ, SAM or VCF.')
+@main.command(
+        name='analyze',
+        help='analyze biological file (format is auto-detected).',
+)
+
 @click.argument('file', type=click.Path())
 @click.option(
     '--format', '-f', 'fmt',
     type=click.Choice(['fasta', 'fastq', 'sam', 'vcf']),
-    help='Формат файла (определяется автоматически, если не указан).',
+    help='File format (auto-detected if not specified).',
 )
 @click.option(
     '--test', '-t', is_flag=True,
-    help='Запустить тесты перед анализом (только для FASTA/FASTQ).',
+    help='Run tests before analyzsis (FASTA/FASTQ only).',
 )
 @click.option(
     '--output', '-o', is_flag=True,
-    help='Записать вывод в файл (output_<format>.txt).',
+    help='Write output to file (output_<format>.txt).',
 )
 @click.option(
     '--start', '-s', type=click.IntRange(min=1), default=None,
-    help='Начало геномного региона (SAM/VCF, по умолчанию 1).',
+    help='Genomic region start (SAM/VCF, default 1).',
 )
 @click.option(
     '--end', '-e', type=click.IntRange(min=1), default=None,
-    help='Конец геномного региона (SAM/VCF, по умолчанию 10000).',
+    help='Genomic region end (SAM/VCF, default 10000).',
 )
 def analyze(file, fmt, test, output, start, end):
     """Analyze biological file (FASTA, FASTQ, SAM или VCF).
@@ -219,4 +222,4 @@ def analyze(file, fmt, test, output, start, end):
 
 
 if __name__ == '__main__':
-    analyze()
+    main()

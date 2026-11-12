@@ -6,8 +6,6 @@ from collections import defaultdict
 from abstract import SequenceReader
 from record import SequenceRecord
 
-OUTPUT_DIR = Path(__file__).resolve().parent.parent / "test" / "plots"
-
 """Анализатор FASTQ-файлов.
 
 Читает последовательности и Phred-качество, считает базовую статистику
@@ -19,6 +17,8 @@ Examples:
     ...     a.get_seq_count()
     1000
 """
+
+OUTPUT_DIR = Path(__file__).resolve().parent.parent / "test" / "plots"
 
 class FastqAnalyzer(SequenceReader):
     """
@@ -266,7 +266,7 @@ class FastqAnalyzer(SequenceReader):
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         
-        print(f"График качества создан: {output_path}")
+        print(f"    График качества создан: {output_path}")
         return output_path
 
     def per_base_sequence_content(self, output_file: str = "fastq_content_plot.png"):
@@ -336,7 +336,7 @@ class FastqAnalyzer(SequenceReader):
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         
-        print(f"График содержания создан: {output_path}")
+        print(f"    График содержания создан: {output_path}")
         return output_path
 
     def sequence_length_distribution(self, output_file: str = "fastq_length_plot.png"):
@@ -377,7 +377,7 @@ class FastqAnalyzer(SequenceReader):
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         
-        print(f"График распределения длин создан: {output_path}")
+        print(f"    График распределения длин создан: {output_path}")
         return output_path
 
 
@@ -399,12 +399,12 @@ def demo_fastq_analysis(filepath: str):
         1. Количество последовательностей: 1000
         2. Средняя длина последовательностей: 150.00
     """
-    print("========== Анализ FASTQ ==========")
+    print("\n============================ Анализ FASTQ ============================\n")
     print(f"Выбранный файл: {filepath}")
+    print("=" * 70)
     
     # Предварительная проверка файла
     with open(filepath, "r", encoding="utf-8") as f:
-        print("Файл читается:")
         first_lines = [line.strip() for line in f.readlines()[:4]]
         if len(first_lines) < 4:
             print(f"❌ Файл содержит только {len(first_lines)} строк - он не является FASTQ файлом."
@@ -424,6 +424,7 @@ def demo_fastq_analysis(filepath: str):
     
     # Базовая статистика
     sequences = list(analyzer.read())
+    print()
     print(f"1. Количество последовательностей: {analyzer.get_seq_count()}")
     print(f"2. Средняя длина последовательностей: {analyzer.get_mean_seq_length():.2f}")
     
@@ -432,11 +433,22 @@ def demo_fastq_analysis(filepath: str):
         return
     
     # Создание диагностических графиков
-    print("3. Создание графиков...")
+    print("3. Создание графиков:")
     quality_plot = analyzer.per_base_sequence_quality()
     content_plot = analyzer.per_base_sequence_content()
     length_plot = analyzer.sequence_length_distribution()
+<<<<<<< HEAD
     
     print(f"4. График качества: {quality_plot}")
     print(f"5. График содержания: {content_plot}")
     print(f"6. Распределение длин: {length_plot}")    
+=======
+
+    print()
+    print("=" * 70)
+
+
+
+
+    
+>>>>>>> main

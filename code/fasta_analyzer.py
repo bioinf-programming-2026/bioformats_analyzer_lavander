@@ -212,8 +212,9 @@ def demo_fasta_analysis(filepath: str):
         1. Количество последовательностей: 2
         2. Средняя длина последовательностей: 4.00
     """
-    print("========== Анализ FASTA ==========")
+    print("\n============================ Анализ FASTA ============================\n")
     print(f"Выбранный файл: {filepath}")
+    print("=" * 70)
     
     # Использование контекстного менеджера для гарантированного закрытия файла
     with FastaAnalyzer(filepath) as analyzer:
@@ -221,5 +222,8 @@ def demo_fasta_analysis(filepath: str):
         sequences = list(analyzer.read())
         
         # ВЫВОД РЕЗУЛЬТАТОВ СОГЛАСНО ТРЕБОВАНИЯМ ЗАДАНИЯ:
+        print()
         print(f"1. Количество последовательностей: {analyzer.get_seq_count()}")
         print(f"2. Средняя длина последовательностей: {analyzer.get_mean_seq_length():.2f}")
+        print()
+        print("=" * 70)

@@ -42,11 +42,18 @@ class Reader(ABC):
         Args:
             filepath: Путь к файлу в виде строки или объекта Path.
 
+        Raises: 
+            TypeError: Если передан не `str` и не `Path`.
+
         Examples:
             >>> r = FastaAnalyzer("seqs.fasta")
             >>> r.filepath
             PosixPath('seqs.fasta')
         """
+        if not isinstance(filepath, (str, Path)):
+            raise TypeError(
+                f"Путь должен быть строкой или Path, получено: {type(filepath)}"
+            )
         self.filepath = Path(filepath)
         self.file = None
 
@@ -71,15 +78,31 @@ class Reader(ABC):
     def __enter__(self):
         """Открывает файл при входе в блок `with`.
 
+        Перед открытием проверяет, что путь существует, не является каталогом
+        и файл не пуст.
+
         Returns:
             Reader: Текущий экземпляр ридера.
+
+        Raises:
+            FileNotFoundError: Если файл не найден.
+            IsADirectoryError: Еслт путь указывает на каталог.
+            ValueError: Если файл пуст.
 
         Examples:
             >>> with FastaAnalyzer("seqs.fasta") as r:
             ...     r.file.closed
             False
         """
-        self.file = open(self.filepath, "r", encoding="utf-8")
+        if not self.filepath.exists():
+            raise FileNotFoundError(f"Файл '{self.filepath}' не найден.")
+        if self.filepath.is_dir():
+            raise IsADirectoryError(f"Путь является папкой: '{self.filepath}'")
+        if self.filepath.stat().st_size == 0:
+            raise ValueError(f"Файл '{self.filepath}' пуст.")
+
+        if self.file is None or self.file.closed:
+            self.file = open(self.filepath, "r", encoding="utf-8")
         return self
     
     def close(self):
@@ -112,10 +135,6 @@ class Reader(ABC):
             ...     pass
             >>> r.file is None
             True
-            
-        Действия:
-            - Вызывает родительский __exit__ для закрытия файла
-            - Сбрасывает все внутренние состояния ридера
         """
         self.close()
 
@@ -259,11 +278,17 @@ class GenomicReader(Reader):
     def __enter__(self):
         """Открывает файл и разбирает заголовок при входе в блок `with`.
 
+        Использует валидацию из `Reader.__enter__` (существование, не-каталог, непустота),
+        после чего вызывает `_parse_header()`.
+
         Returns:
             GenomicReader: Текущий экземпляр ридера.
 
         Raises:
-            RuntimeError: Если файл не удалось открыть или разобрать заголовок.
+            FileNotFoundError: Если файл не найден.
+            IsADirectoryError: Если путь - каталог.
+            ValueError: Если файл пуст или заголовок некорректен.
+                Тип и текст ошибки определяются наследником в `_parse_header`.
 
         Examples:
             >>> with SamReader("aln.sam") as r:
@@ -271,14 +296,15 @@ class GenomicReader(Reader):
             True
         """
         try:
-            self.file = open(self.filepath, "r", encoding="utf-8")
+            super().__enter__()
             self._parse_header()
             return self
-        except Exception as e:
+        except Exception:
             # если ошибка — аккуратно закрываем файл, чтобы не остался висеть
             if self.file and not self.file.closed:
                 self.file.close()
-            raise RuntimeError(f"Ошибка при открытии или парсинге файла {self.filepath}") from e
+            self.file = None
+            raise
 
     @abstractmethod
     def _parse_header(self):
@@ -327,9 +353,13 @@ class GenomicReader(Reader):
     def validate_coordinate(self, chrom: str, pos: int) -> bool:
         """Проверяет корректность геномной координаты.
 
+        Базовая реализация проверяет только то, что `pos` - положительное
+        целое (1-based). Наследники могут усилить проверку - например, дополнительно
+        проверить наличие `chrom` в файле (так делает `VcfReader`).
+
         Args:
             chrom: Название хромосомы.
-            pos: Позиция на хромосоме.
+            pos: Позиция на хромосоме (1-based).
 
         Returns:
             bool: True, если координата корректна.
@@ -339,10 +369,10 @@ class GenomicReader(Reader):
             ...     r.validate_coordinate("chr1", 100)
             True
             >>> with SamReader("aln.sam") as r:
-            ...     r.validate_coordinate("chrX", 100)
+            ...     r.validate_coordinate("chr1", 0)
             False
         """
-        pass
+        return isinstance(pos, int) and pos > 0
 
     @abstractmethod
     def get_records_in_region(self, chrom: str, start: int, end: int) -> Iterator[Record]:

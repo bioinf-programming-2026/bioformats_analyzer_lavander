@@ -46,15 +46,15 @@
 Для того, чтобы **запустить программу**, состоящую из .py модулей, выполните в терминале в папке *code/* склонированного репозитория следующую команду:
 
 ```bash
-    python bioformats_analyzer.py [OPTIONS] FILE
+    python bioformats_analyzer.py COMMAND [OPTIONS] FILE
 ```
 
-Здесь FILE - абсолютный или относительный путь к анализируемому файлу, \[OPTIONS\] - параметры.
+Здесь FILE - абсолютный или относительный путь к анализируемому файлу, \[OPTIONS\] - параметры (аргументы), COMMAND - команда анализа (analyze)
     
 Так как тестовые файлы хранятся в папке *test/files*, лучше указывать её:
 
 ```bash
-    python bioformats_analyzer.py [OPTIONS] ../test/files/example.file
+    python bioformats_analyzer.py analyze [OPTIONS] ../test/files/example.file
 ```
 
 Программа выполнится и выдаст следующую информацию: 
